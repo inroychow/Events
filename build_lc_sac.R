@@ -162,4 +162,46 @@ tract_year_lc <- tract_huc_lc %>%
 # saveRDS(tract_year_lc, "data/tract_year_lc.rds")
 
 
+# --------------------------------------------------
+# Simplified: developed vs. undeveloped only
+# NLCD codes 21-24 = developed; everything else = undeveloped
+# --------------------------------------------------
+lc_shares <- readRDS("data/lc_shares_sac.rds")
+lc_shares$huc12 <- str_pad(as.character(lc_shares$huc12), 12, pad = "0")
+
+# Derive undeveloped_share as complement of developed_share, per year
+for (yr in c(2009, 2012, 2015, 2018, 2021, 2024)) {
+  lc_shares[[paste0("undeveloped_share_", yr)]] <-
+    1 - lc_shares[[paste0("developed_share_", yr)]]
+  lc_shares[[paste0("undeveloped_sqkm_", yr)]] <-
+    lc_shares[[paste0("water_sqkm_", yr)]] +
+    lc_shares[[paste0("barren_sqkm_", yr)]] +
+    lc_shares[[paste0("forest_sqkm_", yr)]] +
+    lc_shares[[paste0("shrub_grass_sqkm_", yr)]] +
+    lc_shares[[paste0("agriculture_sqkm_", yr)]] +
+    lc_shares[[paste0("wetland_sqkm_", yr)]]
+}
+# Pivot to long
+lc_long <- lc_shares %>%
+  select(huc12, matches("^(developed|undeveloped)_(share|sqkm)_\\d{4}$")) %>%
+  pivot_longer(
+    cols = -huc12,
+    names_to  = c("group", "metric", "year"),
+    names_pattern = "(.+)_(share|sqkm)_(\\d{4})",
+    values_to = "value"
+  ) %>%
+  pivot_wider(names_from = c(group, metric), values_from = value)
+
+# Area-weighted average upstream land cover per tract-year
+tract_year_lc <- htdt_sac %>%
+  left_join(lc_long,  by = c("upstream_huc12" = "huc12")) %>%
+  left_join(huc_area, by = c("upstream_huc12" = "huc12")) %>%
+  group_by(tract, year) %>%
+  summarise(
+    across(c(developed_share, undeveloped_share, developed_sqkm, undeveloped_sqkm),
+           ~ weighted.mean(.x, w = area_sqkm_huc, na.rm = TRUE)),
+    .groups = "drop"
+  )
+
+saveRDS(tract_year_lc, "sac/data/tract_year_lc2.rds")
 
