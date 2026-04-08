@@ -6,7 +6,7 @@ library(dplyr)
 claims_sac = readRDS("sac/data/claims_sac.rds")
 policies_sac = readRDS("sac/data/policies_sac.rds")
 event_days_post2009 = readRDS("sac/data/eventmap_post2009_sac.rds")
-tract_year_lc = readRDS("data/tract_year_lc.rds")
+tract_year_lc = readRDS("data/tract_year_lc2.rds")
 #-----------------------------#
 # 1. Standardize inputs
 #-----------------------------#
@@ -209,5 +209,6 @@ for (v in landcover_vars) {
   panel[, (new_name) := get(v) * extreme_event]
 }
 
-
-saveRDS(panel, "data/panel_sac.rds")
+panel[, claims_per_coverage := fifelse(active_coverage > 0, tract_total_paid / active_coverage, NA_real_)]
+saveRDS(panel, "sac/data/panel_sac2.rds")
+saveRDS(panel, "data/panel_sac_all.rds")
