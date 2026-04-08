@@ -2,8 +2,6 @@ library(data.table)
 library(stringr)
 library(tidyverse)
 
-setDT(panel2)
-
 # Load needed data in here ----------
 huc12_landcover = readRDS("sac/data/lc_huc12_sac.rds") #load in landcover sac, just share developed and share undeveloped (not weighted by area rn)
 upstream_map= readRDS("sac/data/htdt_sac.rds") #huc12 to downstream tract mapping
@@ -123,7 +121,7 @@ huc4_panel[, tau_factor := factor(tau, levels = tau_levels)]
 # Merge in basin-wide weighted land cover (huc4 × year) 
 # huc4_landcover already has: huc4, year, weighted_developed_share,
 #   weighted_undeveloped_share, weighted_developed_sqkm, weighted_undeveloped_sqkm
-
+huc4_landcover$year = as.integer(huc4_landcover$year)
 huc4_panel <- merge(
   huc4_panel,
   huc4_landcover[, .(huc4, year,
@@ -137,3 +135,33 @@ huc4_panel <- merge(
 
 
 head(huc4_panel)
+
+# Create a lookup with the NLCD years you actually have
+nlcd_years <- huc4_landcover[, .(huc4, year, 
+                                 weighted_developed_share,
+                                 weighted_undeveloped_share,
+                                 weighted_developed_sqkm,
+                                 weighted_undeveloped_sqkm)]
+setkey(nlcd_years, huc4, year)
+setkey(huc4_panel, huc4, year)
+
+# Rolling join: each panel year gets the most recent NLCD year <= it
+huc4_panel <- nlcd_years[huc4_panel, roll = TRUE]
+huc4_panel[, c("i.weighted_developed_share", 
+               "i.weighted_undeveloped_share",
+               "i.weighted_developed_sqkm", 
+               "i.weighted_undeveloped_sqkm") := NULL]
+
+# Rerun on full event-window data
+huc4_panel[, tau_factor := relevel(tau_factor, ref = "-1")]
+
+# saveRDS(huc4_panel, "sac/data/huc4_panel_sac.rds")
+
+m1 <- feols(
+  Y_dy ~ tau_factor + tau_factor : weighted_developed_share
+  | event_id,
+  data = huc4_panel[in_event_window == 1],
+  vcov = "hetero"
+)
+
+etable(m1)
