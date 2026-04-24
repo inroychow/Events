@@ -27,10 +27,13 @@ We use **RStudio version 4.4.3** to run all code. Required R packages are loaded
 ## 4. Code and software
 These files should be run in order. 
 
+- **build_htdt_distances.R:** Calculates km distance between upstream HUC12 centroids and downstream census tract centroids.
 - **extract_precip_sac.R:** Extracts and saves daily precipitation data for the Sacramento HUC4 watershed.
--  **build_events_sac_2009.R:** builds extreme events (95th percentile) for the Sacramento HUC4 watershed, starting in the year 2009.
+-  **build_events.R:** builds extreme events (95th percentile) for the CONUS HUC4 watersheds, starting in the year 2009.
 - **build_nfip_sac.R:** Cleans NFIP claims and policy data, aggregating to the census tract level.
 - **build_lc_sac.R:** builds land cover snapshots for the panel years for the Sacramento HUC4 watershed, starting in the year 2009.
+- **build_runoff:** uses USDA Soil Conservation Service Curve Numbers (CN) to estimate downstream runoff for each HUC12, based on land cover proportion.
+- **ddecay_weighting:** applies exponential distance decay weighting to land cover shares and runoff upstream of each census tract.
 - **create_panel.R:** Generates main dataset for analysis, with land cover at the HUC12 watershed level.
 - **policy_weighting.R:** Aggregates up to the HUC4 level by weighting HUC12 watershed landcover by NFIP policy count downstream.
 - **analysis_sac.R:** Runs event study models of relationship between upstream land cover change and flood damages. 
