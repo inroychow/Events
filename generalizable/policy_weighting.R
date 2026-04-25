@@ -135,26 +135,23 @@ huc12_long_w[, weight_2009 := fifelse(is.na(weight_2009), 0, weight_2009)]
 huc4_landcover <- huc12_long_w[
   ,
   .(
-    weighted_developed_sqkm =
-      sum(developed_sqkm * weight_2009, na.rm = TRUE),
-    weighted_undeveloped_sqkm =
-      sum(undeveloped_sqkm * weight_2009, na.rm = TRUE),
-    weighted_total_sqkm =
-      sum(area_sqkm_huc12 * weight_2009, na.rm = TRUE)
+    weighted_developed_share =
+      fifelse(
+        sum(weight_2009 * area_sqkm_huc12, na.rm = TRUE) > 0,
+        sum(developed_share * weight_2009 * area_sqkm_huc12, na.rm = TRUE) /
+          sum(weight_2009 * area_sqkm_huc12, na.rm = TRUE),
+        NA_real_
+      ),
+    weighted_undeveloped_share =
+      fifelse(
+        sum(weight_2009 * area_sqkm_huc12, na.rm = TRUE) > 0,
+        sum(undeveloped_share * weight_2009 * area_sqkm_huc12, na.rm = TRUE) /
+          sum(weight_2009 * area_sqkm_huc12, na.rm = TRUE),
+        NA_real_
+      )
   ),
   by = .(huc4, year)
 ]
-
-huc4_landcover[, weighted_developed_share :=
-                 fifelse(weighted_total_sqkm > 0,
-                         weighted_developed_sqkm / weighted_total_sqkm,
-                         NA_real_)]
-
-huc4_landcover[, weighted_undeveloped_share :=
-                 fifelse(weighted_total_sqkm > 0,
-                         weighted_undeveloped_sqkm / weighted_total_sqkm,
-                         NA_real_)]
-
 # -----------------------------
 # Build HUC4-day panel from panel2
 # -----------------------------
@@ -218,7 +215,7 @@ setkey(huc4_panel, huc4, year)
 
 huc4_panel <- nlcd_years[huc4_panel, roll = TRUE]
 
-saveRDS(huc4_panel, "sac/data/huc4_panel_sac_wtd.rds")
+#saveRDS(huc4_panel, "sac/data/huc4_panel_sac_wtd.rds")
 
 # -----------------------------
 # Model

@@ -64,7 +64,8 @@ build_panel <- function(
     T_post         = 7L,    # days after  event_start for event-study window
     lc_area_weighted = FALSE, # TRUE → use tract_year_lc_aw.rds
     save_main_panel  = TRUE,
-    save_event_panel = TRUE
+    save_event_panel = TRUE,
+    runoff_file = "tract_day_dd_runoff_1802.rds"
 ) {
   
   # ------------------------------------------------------------------
@@ -73,7 +74,8 @@ build_panel <- function(
   if (is.null(data_dir)) data_dir <- file.path(region_tag, "data")
   if (is.null(out_dir))  out_dir  <- data_dir
   
-  lc_file <- if (lc_area_weighted) "tract_year_lc_sac_aw.rds" else "tract_year_lc_sac.rds"
+  # lc_file <- if (lc_area_weighted) "tract_year_lc_sac_aw.rds" else "tract_year_lc_sac.rds" # this is not dd weighted
+  lc_file <- paste0("tract_year_lc_dd_", target_huc4s, ".rds") #dd weighted
   
   message("=== build_panel | region: ", region_tag,
           " | HUC4s: ", paste(target_huc4s, collapse = ", "), " ===")
@@ -85,6 +87,7 @@ build_panel <- function(
   policies_raw <- readRDS(file.path(data_dir, "policies_sac.rds"))      |> as.data.table()
   events_raw   <- readRDS(file.path(data_dir, "eventdays_post2009_sac.rds")) |> as.data.table()
   lc_raw       <- readRDS(file.path(data_dir, lc_file))                 |> as.data.table()
+  runoff_raw <- readRDS(file.path(data_dir, runoff_file)) |> as.data.table()
   
   # character IDs
   for (dt in list(claims_raw, policies_raw, lc_raw)) {
@@ -100,6 +103,9 @@ build_panel <- function(
   events_raw[, event_end   := as.Date(event_end)]
   events_raw[, peak_date   := as.Date(peak_date)]
   lc_raw[, year := as.integer(year)]
+  
+  runoff_raw[, tract := as.character(tract)]
+  runoff_raw[, date := as.Date(date)]
   
   # ------------------------------------------------------------------
   # Filter to target HUC4s
@@ -190,6 +196,15 @@ build_panel <- function(
   panel[is.na(extreme_event), extreme_event := 0L]
   panel[is.na(is_peak_day),   is_peak_day   := 0L]
   
+  
+  # ------------------------------------------------------------------
+  # Join tract-day upstream runoff exposure
+  # ------------------------------------------------------------------
+  
+  panel <- runoff_raw[panel, on = .(tract, date)]
+  
+  panel[is.na(upstream_runoff_in), upstream_runoff_in := 0]
+  panel[is.na(upstream_precip_3day_in), upstream_precip_3day_in := 0]
   # ------------------------------------------------------------------
   #  Land-cover year assignment  (most recent NLCD snapshot)
   # ------------------------------------------------------------------
@@ -233,6 +248,8 @@ build_panel <- function(
   for (v in lc_present) {
     panel[, paste0("event_x_", v) := .SD[[1L]] * extreme_event, .SDcols = v]
   }
+  
+  panel[, event_x_upstream_runoff := extreme_event * upstream_runoff_in]
   
   #Make outcome - fraction of total paid / active coverage
   panel[, claims_per_coverage := fifelse(
@@ -317,9 +334,12 @@ build_panel <- function(
 
 # can evetually do this with a vector of all the HUC4s in conus using target_huc4s
 build_panel(
-  target_huc4s     = "1802",
-  region_tag       = "sac",
-  lc_area_weighted = FALSE,
-  T_pre            = 7L,
-  T_post           = 7L
+  target_huc4s      = "1802",
+  region_tag        = "sac",
+  lc_area_weighted  = FALSE,
+  runoff_file       = "tract_day_dd_runoff_1802.rds",
+  T_pre             = 7L,
+  T_post            = 7L,
+  save_main_panel   = FALSE,
+  save_event_panel  = TRUE
 )
