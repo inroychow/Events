@@ -1,22 +1,3 @@
-# =============================================================================
-# Simplified Curve Number Construction for Sacramento HUC4 Basin
-# =============================================================================
-#
-# Purpose: Build a simplified CN raster per NLCD panel year using only NLCD
-#          land cover and one assumed hydrologic soil group, then area-average
-#          to HUC12 subbasins.
-#
-# Main simplification:
-#   - No gSSURGO / HSG raster
-#   - CN is assigned directly from NLCD class using assumed HSG = "C"
-#
-# Outputs:
-#   - data/cn/cn_raster_{year}.tif
-#   - data/cn/cn_huc12.csv
-#   - data/cn/runoff_huc12.csv
-#   - data/upstream_runoff_tract.csv
-#
-# =============================================================================
 
 # -----------------------------------------------------------------------------
 # 0. PACKAGES
@@ -31,6 +12,7 @@ library(dplyr)
 library(tidyr)
 library(readr)
 
+# Need to run extract_prism.R and crop_prism.R
 
 setwd("L:/Wetland Flood Mitigation/Paper_NFIP")
 

@@ -1,6 +1,5 @@
 # =============================================================================
 # PRISM SPATIAL SUBSETTING + EXTRACTION FOR MULTIPLE HUC4s
-# HUC4s: 1806, 1801, 1805, 1804, 1803
 # Assumes PRISM daily ppt already downloaded to "prism_archive"
 # =============================================================================
 

@@ -11,22 +11,22 @@ setwd("L:/Wetland Flood Mitigation/Paper_NFIP")
 # -----------------------------
 huc12_landcover <- readRDS("sac/data/lc_huc12_sac.rds")
 upstream_map    <- readRDS("sac/data/htdt_sac.rds")
-panel2          <- readRDS("sac/data/panel2_sac.rds")
+panel          <- readRDS("sac/data/panel_sac.rds")
 precip_huc12    <- readRDS("data/precip_huc12_tiles/precip_huc12s_all.rds")
 
 precip_huc12 <- precip_huc12 %>%
   rename(huc12 = upstream_huc12)
 
 setDT(precip_huc12)
-setDT(panel2)
+setDT(panel)
 setDT(upstream_map)
 setDT(huc12_landcover)
 
 # -----------------------------
 # Standardize IDs
 # -----------------------------
-if ("tract" %in% names(panel2)) {
-  panel2[, tract := str_pad(as.character(tract), width = 11, side = "left", pad = "0")]
+if ("tract" %in% names(panel)) {
+  panel[, tract := str_pad(as.character(tract), width = 11, side = "left", pad = "0")]
 }
 if ("tract" %in% names(upstream_map)) {
   upstream_map[, tract := str_pad(as.character(tract), width = 11, side = "left", pad = "0")]
@@ -39,9 +39,8 @@ if ("upstream_huc12" %in% names(upstream_map)) {
 }
 
 
-
 # 2009 policy weights per tract
-tract_2009_policies <- panel2[
+tract_2009_policies <- panel[
   year == 2009,
   .(active_policies_2009 = sum(active_policies, na.rm = TRUE)),
   by = tract
@@ -72,9 +71,9 @@ precip_huc4 <- precip_w[
   by = .(huc4, date)
 ]
 
-panel2[, huc4 := "1802"]
+panel[, huc4 := "1802"]
 
-huc4_panel <- panel2[
+huc4_panel <- panel[
   ,
   .(
     total_paid               = sum(tract_total_paid,         na.rm = TRUE),
@@ -107,7 +106,54 @@ huc4_panel <- merge(huc4_panel, precip_huc4, by = c("huc4", "date"), all.x = TRU
 huc4_panel[, Y_dy     := fifelse(total_coverage > 0, total_paid / total_coverage, NA_real_)]
 huc4_panel[, log_Y_dy := fifelse(Y_dy > 0, log(Y_dy), NA_real_)]
 
+# keep event-window rows only
+huc4_panel <- huc4_panel[tau >= -7 & tau <= 7]
+
+# convert inches to mm
+huc4_panel[, upstream_runoff_mm := upstream_runoff_in * 25.4]
+huc4_panel[, upstream_precip_3day_mm := upstream_precip_3day_in * 25.4]
+
+
 # tau factor
 tau_levels <- as.character(-7:7)
-huc4_panel[, tau_factor := relevel(factor(as.character(tau), levels = tau_levels), ref = "-1")]
+huc4_panel[, tau_factor := relevel(
+  factor(as.character(tau), levels = tau_levels),
+  ref = "-1"
+)]
 
+
+
+
+# --- model
+
+library(fixest)
+library(data.table)
+
+setDT(huc4_panel)
+
+# Regression sample
+reg_dt <- huc4_panel[
+  tau >= -7 & tau <= 7 &
+    !is.na(log_Y_dy) &
+    !is.na(tau_factor)
+]
+
+# Use tau = -1 as reference period
+reg_dt[, tau_factor := relevel(factor(tau), ref = "-1")]
+
+# Event-study with land-cover interactions
+m_huc4 <- feols(
+  log_Y_dy ~ 
+    i(tau_factor, ref = "-1") +
+    i(tau_factor, wetland_share, ref = "-1") +
+    i(tau_factor, developed_share, ref = "-1") +
+    i(tau_factor, forest_share, ref = "-1") +
+    upstream_precip_3day_mm +
+    upstream_runoff_mm +
+    log(total_policies + 1) |
+    event_year,
+  data = reg_dt,
+  vcov = "hetero"
+)
+
+summary(m_huc4)

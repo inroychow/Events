@@ -1,238 +1,239 @@
-library(sf)
+
+# =============================================================
+
 library(data.table)
-library(dplyr)
 library(stringr)
-library(bit64)
-library(tidyr)
 
-# ------------------------------------------------------------
-# Inputs needed:
-# precip_event_huc12: huc12-date runoff data
-# htdt_distance_by_huc4_weighted/: weighted distance files from build_combined_weights.R
-# lc_huc12_sac.rds: HUC12 land cover shares
-# ------------------------------------------------------------
+setwd("L:/Wetland Flood Mitigation/Paper_NFIP")
 
+# -----------------------------
+# User inputs
+# -----------------------------
 target_huc4s <- "1802"
+weights_dir  <- "sac/data"
+lc_path      <- "sac/data/lc_huc12_sac.rds"
+runoff_path  <- "sac/data/runoff_huc12_sac.rds"
+out_dir      <- "sac/data"
 
-# =============================================================
-# RUNOFF
-# build_tract_day_runoff_expdecay()
-#
-# Aggregates HUC12-day runoff to tract-day using combined weights
-# (distance decay x HUC12 area x 2009 tract policies) from
-# build_combined_weights.R. No weighting recomputed here.
-# =============================================================
+# NLCD snapshot years
+lc_breaks <- c(2009L, 2012L, 2015L, 2018L, 2021L, 2024L)
 
-build_tract_day_runoff_expdecay <- function(
-    huc4_id,
-    precip_event_huc12,
-    distance_dir = "data/htdt_distance_by_huc4_weighted",
-    out_dir      = "sac/data"
-) {
-  
-  message("Processing HUC4: ", huc4_id)
-  
-  # -----------------------------
-  # Load combined-weight distance file
-  # -----------------------------
-  dist_file <- file.path(distance_dir, paste0("htdt_dist_weighted_", huc4_id, ".csv"))
-  
-  if (!file.exists(dist_file)) {
-    stop("Weighted distance file not found: ", dist_file,
-         "\nRun build_combined_weights.R first.")
-  }
-  
-  htdt_dist <- fread(dist_file)
-  
-  htdt_dist[, upstream_huc12 := str_pad(
-    as.character(as.integer64(upstream_huc12)), 12, pad = "0"
-  )]
-  htdt_dist[, tract := str_pad(as.character(tract), 11, pad = "0")]
-  htdt_dist[, huc4  := as.character(huc4)]
-  htdt_dist <- htdt_dist[huc4 == huc4_id]
-  
-  # -----------------------------
-  # Prep runoff data
-  # -----------------------------
-  runoff_dt <- as.data.table(precip_event_huc12)
-  
-  runoff_dt[, huc12 := str_pad(as.character(huc12), 12, pad = "0")]
-  runoff_dt[, huc4  := str_sub(huc12, 1, 4)]
-  runoff_dt[, date  := as.Date(date)]
-  
-  runoff_dt <- runoff_dt[huc4 == huc4_id]
-  
-  # -----------------------------
-  # Join HUC12 runoff to downstream tracts
-  # -----------------------------
-  tract_runoff_long <- merge(
-    htdt_dist,
-    runoff_dt,
-    by.x = "upstream_huc12",
-    by.y = "huc12",
-    allow.cartesian = TRUE
-  )
-  
-  # -----------------------------
-  # Aggregate to tract-day using combined_weight
-  # (distance decay x HUC12 area x 2009 policies — built in build_combined_weights.R)
-  # -----------------------------
-  tract_day_runoff <- tract_runoff_long[
-    ,
-    .(
-      upstream_runoff_in      = weighted.mean(runoff_in,      w = combined_weight, na.rm = TRUE),
-      upstream_precip_3day_in = weighted.mean(precip_3day_in, w = combined_weight, na.rm = TRUE)
-    ),
-    by = .(tract, date)
-  ]
-  
-  # -----------------------------
-  # Save
-  # -----------------------------
-  out_file <- file.path(out_dir, paste0("tract_day_dd_runoff_", huc4_id, ".rds"))
-  saveRDS(tract_day_runoff, out_file)
-  message("Saved: ", out_file)
-  
-  return(tract_day_runoff)
+assign_lc_year <- function(dates) {
+  yr <- as.integer(format(dates, "%Y"))
+  vapply(yr, function(y) {
+    valid <- lc_breaks[lc_breaks <= y]
+    if (length(valid) == 0L) lc_breaks[1L] else max(valid)
+  }, integer(1L))
 }
 
-# -----------------------------
-# Run
-# -----------------------------
-runoff_list <- lapply(target_huc4s, function(huc4) {
-  build_tract_day_runoff_expdecay(
-    huc4_id           = huc4,
-    precip_event_huc12 = precip_event_huc12
-  )
-})
-
-# tract_day_runoff_all <- rbindlist(runoff_list, fill = TRUE)
-# saveRDS(
-#   tract_day_runoff_all,
-#   "data/tract_day_upstream_runoff_expdecay_all_huc4s.rds"
-# )
-
-
-# =============================================================
-# LAND COVER
-# build_tract_year_lc_expdecay()
-#
-# Aggregates HUC12-year land cover to tract-year using combined weights
-# (distance decay x HUC12 area x 2009 tract policies) from
-# build_combined_weights.R. No weighting recomputed here.
-# =============================================================
-
-lc_shares <- readRDS("sac/data/lc_huc12_sac.rds")
-
-lc_long <- lc_shares %>%
-  pivot_longer(
-    cols = matches("_(share|sqkm)_\\d{4}$"),
-    names_to  = c("group", "metric", "year"),
-    names_pattern = "(.+)_(share|sqkm)_(\\d{4})",
-    values_to = "value"
-  ) %>%
-  pivot_wider(
-    id_cols    = c(huc12, huc4, year),
-    names_from = c(group, metric),
-    values_from = value
-  ) %>%
-  mutate(
-    year  = as.integer(year),
-    huc12 = str_pad(as.character(huc12), 12, pad = "0"),
-    huc4  = str_sub(huc12, 1, 4)
-  )
-
-build_tract_year_lc_expdecay <- function(
-    huc4_id,
-    lc_long,
-    distance_dir = "data/htdt_distance_by_huc4_weighted",
-    out_dir      = "sac/data"
-) {
-  
-  message("Processing HUC4: ", huc4_id)
-  
-  # -----------------------------
-  # Load combined-weight distance file
-  # -----------------------------
-  dist_file <- file.path(distance_dir, paste0("htdt_dist_weighted_", huc4_id, ".csv"))
-  
-  if (!file.exists(dist_file)) {
-    stop("Weighted distance file not found: ", dist_file,
-         "\nRun build_combined_weights.R first.")
-  }
-  
-  htdt_dist <- fread(dist_file)
-  
-  htdt_dist[, upstream_huc12 := str_pad(
-    as.character(as.integer64(upstream_huc12)), 12, pad = "0"
-  )]
-  htdt_dist[, tract := str_pad(as.character(tract), 11, pad = "0")]
-  htdt_dist[, huc4  := as.character(huc4)]
-  htdt_dist <- htdt_dist[huc4 == huc4_id]
-  
-  # -----------------------------
-  # Prep land cover data
-  # -----------------------------
-  lc_dt <- as.data.table(lc_long)
-  lc_dt[, huc12 := str_pad(as.character(huc12), 12, pad = "0")]
-  lc_dt[, huc4  := str_sub(huc12, 1, 4)]
-  lc_dt <- lc_dt[huc4 == huc4_id]
-  
-  # -----------------------------
-  # Join HUC12 land cover to downstream tracts
-  # -----------------------------
-  tract_huc_lc <- merge(
-    htdt_dist,
-    lc_dt,
-    by.x = "upstream_huc12",
-    by.y = "huc12",
-    allow.cartesian = TRUE
-  )
-  
-  lc_vars <- c(
-    "agriculture_share",
-    "barren_share",
-    "developed_share",
-    "forest_share",
-    "shrub_grass_share",
-    "water_share",
-    "wetland_share",
-    "undeveloped_share"
-  )
-  
-  lc_vars <- intersect(lc_vars, names(tract_huc_lc))
-  
-  # -----------------------------
-  # Aggregate to tract-year using combined_weight
-  # (distance decay x HUC12 area x 2009 policies — built in build_combined_weights.R)
-  # -----------------------------
-  tract_year_lc_expdecay <- tract_huc_lc[
-    ,
-    c(
-      lapply(.SD, function(x) weighted.mean(x, w = combined_weight, na.rm = TRUE)),
-      list(
-        mean_upstream_dist_km = weighted.mean(dist_km,        w = combined_weight, na.rm = TRUE),
-        n_upstream_huc12      = uniqueN(upstream_huc12)
-      )
-    ),
-    by      = .(tract, year),
-    .SDcols = lc_vars
-  ]
-  
-  # -----------------------------
-  # Save
-  # -----------------------------
-  out_file <- file.path(out_dir, paste0("tract_year_lc_dd_", huc4_id, ".rds"))
-  saveRDS(tract_year_lc_expdecay, out_file)
-  message("Saved: ", out_file)
-  
-  return(tract_year_lc_expdecay)
-}
-
-# -----------------------------
-# Run
-# -----------------------------
-tract_year_lc_expdecay_1802 <- build_tract_year_lc_expdecay(
-  huc4_id  = "1802",
-  lc_long  = lc_long
+lc_share_cols <- c(
+  "agriculture_share", "barren_share", "developed_share",
+  "forest_share", "shrub_grass_share", "water_share", "wetland_share",
+  "undeveloped_share"
 )
+
+runoff_cols <- c("runoff_in", "precip_mm", "roll3_huc12", "precip_3day_in")
+
+# =============================================================
+# Load and reshape land cover (wide -> long)
+# =============================================================
+message("Loading and reshaping land cover shares...")
+lc <- readRDS(lc_path) |> as.data.table()
+lc[, huc12 := str_pad(as.character(huc12), 12, pad = "0")]
+
+# identify share columns -- pattern: <cover>_share_<year>
+share_cols <- grep("_share_\\d{4}$", names(lc), value = TRUE)
+
+# melt to long
+lc_long <- melt(
+  lc[, c("huc12", share_cols), with = FALSE],
+  id.vars      = "huc12",
+  measure.vars = share_cols,
+  variable.name = "col_name",
+  value.name    = "share_value"
+)
+
+# parse cover type and year
+lc_long[, lc_year    := as.integer(str_extract(col_name, "\\d{4}$"))]
+lc_long[, cover_type := str_remove(col_name, "_\\d{4}$")]
+lc_long[, col_name   := NULL]
+
+# cast back to one column per cover type, one row per huc12 x lc_year
+lc <- dcast(lc_long, huc12 + lc_year ~ cover_type, value.var = "share_value")
+
+cat(sprintf("LC rows: %d | HUC12s: %d | Years: %s\n",
+            nrow(lc),
+            uniqueN(lc$huc12),
+            paste(sort(unique(lc$lc_year)), collapse = ", ")))
+
+# =============================================================
+# Load runoff
+# =============================================================
+message("Loading runoff...")
+runoff <- readRDS(runoff_path) |> as.data.table()
+runoff[, huc12 := str_pad(as.character(huc12), 12, pad = "0")]
+runoff[, date  := as.Date(date)]
+
+runoff_cols_keep <- c("huc12", "date", intersect(runoff_cols, names(runoff)))
+runoff <- unique(runoff[, ..runoff_cols_keep])
+
+target_huc4s = "1802"
+# =============================================================
+# Loop over HUC4s
+# =============================================================
+for (huc4_id in target_huc4s) {
+  message("\n=== HUC4: ", huc4_id, " ===")
+  
+  # ------------------------------------------------------------------
+  # Load weights (huc12 x tract x date, with all components)
+  # ------------------------------------------------------------------
+  w <- readRDS(file.path(weights_dir,
+                         paste0("htdt_weights_", huc4_id, ".rds")))
+  w[, upstream_huc12 := str_pad(as.character(upstream_huc12), 12, pad = "0")]
+  w[, tract          := str_pad(as.character(tract),          11, pad = "0")]
+  w[, date           := as.Date(date)]
+  
+  cat(sprintf("  Weight rows (huc12 x tract x date): %d\n",  nrow(w)))
+  cat(sprintf("  Unique HUC12s: %d | Tracts: %d | Dates: %d\n",
+              uniqueN(w$upstream_huc12),
+              uniqueN(w$tract),
+              uniqueN(w$date)))
+  
+  # ── EXPAND TO FULL EVENT WINDOWS ──────────────────────────────────
+  T_pre  <- 14L
+  T_post <- 14L
+  
+  event_dates <- unique(w$date)
+  
+  window_dates <- rbindlist(lapply(event_dates, function(ed) {
+    data.table(event_date = ed,
+               date       = seq(ed - T_pre, ed + T_post, by = "day"))
+  }))
+  
+  w <- merge(w, window_dates,
+             by.x = "date", by.y = "event_date",
+             allow.cartesian = TRUE)
+  w[, date := date.y][, date.y := NULL]
+  w <- unique(w)
+  # ──────────────────────────────────────────────────────────────────
+  
+  # assign lc_year to each event date
+  date_lut <- unique(w[, .(date)])
+  date_lut[, year_tmp := year(date)]
+  date_lut[, lc_year := lc_breaks[pmax(1L, findInterval(year_tmp, lc_breaks))]]
+  date_lut[, year_tmp := NULL]
+  
+  w <- date_lut[w, on = "date"]  
+  w[, w_adp := area_sqkm_huc12 * decay_weight * policies_2009]# adp weight: area x decay x policies active downstream on this date
+  
+  # ================================================================
+  # PART 1 — Upstream land cover (tract x date)
+  # Scheme: area x decay x n_active_policies  (adp)
+  # ================================================================
+  message("  Building upstream land cover (area x decay x policies)...")
+  
+  lc_huc4 <- lc[huc12 %in% unique(w$upstream_huc12)]
+  
+  # join LC shares onto weight pairs by huc12 x lc_year
+  lc_weighted <- merge(
+    w[, .(upstream_huc12, tract, huc4, date, lc_year, w_adp)],
+    lc_huc4,
+    by.x  = c("upstream_huc12", "lc_year"),
+    by.y  = c("huc12",          "lc_year"),
+    all.x = TRUE
+  )
+  
+  n_missing_lc <- lc_weighted[is.na(agriculture_share), .N]
+  if (n_missing_lc > 0L)
+    warning(sprintf("  %d huc12-lc_year pairs missing LC shares", n_missing_lc))
+  
+  lc_share_present <- intersect(lc_share_cols, names(lc_weighted))
+  
+  # normalised weighted mean per tract x date
+  lc_tract <- lc_weighted[
+    w_adp > 0,
+    {
+      denom <- sum(w_adp, na.rm = TRUE)
+      out   <- lapply(lc_share_present, function(v) {
+        sum(.SD[[v]] * w_adp, na.rm = TRUE) / denom
+      })
+      names(out) <- lc_share_present
+      c(list(sum_w_adp = denom), out)
+    },
+    by      = .(tract, huc4, date, lc_year),
+    .SDcols = lc_share_present
+  ]
+  
+  setorder(lc_tract, tract, date)
+  
+  cat(sprintf("  LC output rows: %d | Tracts: %d | Dates: %d\n",
+              nrow(lc_tract),
+              uniqueN(lc_tract$tract),
+              uniqueN(lc_tract$date)))
+  cat(sprintf("  lc_year values: %s\n",
+              paste(sort(unique(lc_tract$lc_year)), collapse = ", ")))
+  # 
+  # out_lc <- file.path(out_dir,
+  #                     paste0("tract_day_lc_upstream_adp_", huc4_id, ".rds"))
+  # saveRDS(lc_tract, out_lc)
+  # message("  Saved LC → ", out_lc)
+  
+  # ================================================================
+  # PART 2 — Upstream runoff (tract x date)
+
+  # ================================================================
+  message("  Building upstream runoff (policy-weighted)...")
+  
+  runoff_huc4 <- runoff[huc12 %in% unique(w$upstream_huc12)]
+  
+  # join runoff onto weight pairs by huc12 x date
+  runoff_weighted <- merge(
+    w[, .(upstream_huc12, tract, huc4, date, w_adp)],
+    runoff_huc4,
+    by.x = c("upstream_huc12", "date"),
+    by.y = c("huc12",          "date"),
+    all.x = TRUE
+  )
+  # fill missing runoff with 0
+  runoff_cols_present <- intersect(runoff_cols, names(runoff_weighted))
+  for (col in runoff_cols_present) {
+    runoff_weighted[is.na(get(col)), (col) := 0]
+  }
+  
+  # normalised policy-weighted mean per tract x date
+  runoff_tract <- runoff_weighted[
+    w_adp > 0,
+    {
+      denom <- sum(w_adp, na.rm = TRUE)
+      out <- lapply(runoff_cols_present, function(v) {
+        sum(.SD[[v]] * w_adp, na.rm = TRUE) / denom
+      })
+      names(out) <- paste0("upstream_", runoff_cols_present)
+      out
+    },
+    by      = .(tract, huc4, date),
+    .SDcols = runoff_cols_present
+  ]
+  
+  setorder(runoff_tract, tract, date)
+  
+  cat(sprintf("  Runoff output rows: %d | Tracts: %d | Dates: %d\n",
+              nrow(runoff_tract),
+              uniqueN(runoff_tract$tract),
+              uniqueN(runoff_tract$date)))
+  cat(sprintf("  Date range: %s to %s\n",
+              min(runoff_tract$date),
+              max(runoff_tract$date)))
+  tract_day <- merge(
+    lc_tract,
+    runoff_tract,
+    by  = c("tract", "huc4", "date"),
+    all = TRUE
+  )
+  
+  out_path <- file.path(out_dir, paste0("weighted_lc_runoff_", huc4_id, ".rds"))
+  saveRDS(tract_day, out_path)
+  message("  Saved combined → ", out_path)
+}
+
+message("\nDone.")
