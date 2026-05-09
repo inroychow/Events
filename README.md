@@ -27,6 +27,9 @@ We use **RStudio version 4.4.3** to run all code. Required R packages are loaded
 ## 4. Code and software
 These files should be run in order. 
 
+- **build_htdt_conus.R:** build the huc12 to downstream tract mapping for CONUS
+- **build_tract_huc4s:**: subset tracts to only one HUC4, using centroids. 
+- **build_target_huc4s.R:** The build the vector of HUC4s needed to run in later code, using the huc12 to downstrema tract mapping.
 - **build_htdt_distances.R:** calculates km distance between upstream HUC12 centroids and downstream census tract centroids within HUC4 watersheds.
 - **extract_prism.R:** extracts and saves daily precipitation data for the HUC4 watershed.
 - **crop_prism.R:** processes PRISM daily precipitation rasters into a panel of mean daily precipitation at the HUC12 level for the selected HUC4 watershed.
